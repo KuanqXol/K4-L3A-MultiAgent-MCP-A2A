@@ -21,10 +21,30 @@ class EvidenceGateway:
         response = await self._session.list_tools()
         return sorted(tool.name for tool in response.tools)
 
+    async def describe_tools(self) -> dict[str, dict[str, Any]]:
+        """Return the advertised input schema for every MCP tool.
+
+        Keeping discovery here avoids coupling the workflow to a particular MCP SDK
+        representation (the SDK has used both camelCase and snake_case attributes).
+        The public ``list_tools`` method is intentionally retained for compatibility
+        with simple/fake gateways used by tests.
+        """
+        response = await self._session.list_tools()
+        descriptions: dict[str, dict[str, Any]] = {}
+        for tool in response.tools:
+            schema = getattr(tool, "inputSchema", None)
+            if schema is None:
+                schema = getattr(tool, "input_schema", None)
+            descriptions[tool.name] = schema if isinstance(schema, dict) else {}
+        return dict(sorted(descriptions.items()))
+
     async def call(self, tool_name: str, *, case_id: str, **arguments: str) -> dict[str, Any]:
         payload = {"case_id": case_id, **arguments}
         result = await self._session.call_tool(tool_name, arguments=payload)
-        if result.isError:
+        is_error = getattr(result, "isError", None)
+        if is_error is None:
+            is_error = getattr(result, "is_error", False)
+        if is_error:
             message = " ".join(
                 block.text for block in result.content if getattr(block, "text", None)
             )
